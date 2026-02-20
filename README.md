@@ -11,6 +11,7 @@ This fork adds vllm-omni to the existing kyuz0 vLLM container!
   --image localhost/my-vllm-rocm:latest \
   -- --device /dev/dri --device /dev/kfd \
   --group-add video --group-add render --security-opt seccomp=unconfined
+6. toolbox enter vllm
 
 What follows is the original README.
 
