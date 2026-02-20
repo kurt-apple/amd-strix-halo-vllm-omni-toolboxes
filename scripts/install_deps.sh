@@ -3,7 +3,7 @@ set -e
 
 # 1. System Base & Build Tools
 # Added 'gperftools-libs' for tcmalloc (fixes double-free)
-dnf -y install --setopt=install_weak_deps=False --nodocs \
+dnf -y install --setopt=retries=1 --setopt=timeout=6 --setopt=install_weak_deps=False --nodocs \
   python3.13 python3.13-devel git rsync libatomic bash ca-certificates curl \
   gcc gcc-c++ binutils make ffmpeg-free \
   cmake ninja-build aria2c tar xz vim nano dialog \
