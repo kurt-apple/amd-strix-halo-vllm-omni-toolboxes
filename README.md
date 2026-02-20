@@ -1,4 +1,16 @@
-# AMD Strix Halo (gfx1151) — vLLM Toolbox/Container
+# AMD Strix Halo (gfx1151) — vLLM-Omni Toolbox/Container
+This fork adds vllm-omni to the existing kyuz0 vLLM container!
+
+1. run scripts/install_stuff.sh once to pull large files with specific versions
+2. podman build -f Dockerfile.first -t vllm-rocm-first . 2>&1 | tee build_first.log
+3. podman build -f Dockerfile.second -t vllm-rocm-second . 2>&1 | tee build_second.log
+4. podman build -f Dockerfile.third -t my-vllm-rocm . 2>&1 | tee build_podman.log
+5. toolbox create vllm \
+  --image localhost/my-vllm-rocm:latest \
+  -- --device /dev/dri --device /dev/kfd \
+  --group-add video --group-add render --security-opt seccomp=unconfined
+
+What follows is the original README.
 
 An **Fedora 43** Docker/Podman container that is **Toolbx-compatible** (usable as a Fedora toolbox) for serving LLMs with **vLLM** on **AMD Ryzen AI Max “Strix Halo” (gfx1151)**. Built on the **TheRock nightly builds** for ROCm.
 
