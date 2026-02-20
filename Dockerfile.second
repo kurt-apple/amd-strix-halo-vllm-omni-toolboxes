@@ -1,0 +1,28 @@
+FROM localhost/vllm-rocm-first:latest
+
+# original build method for torch
+#RUN python -m pip install \
+#  --index-url https://rocm.nightlies.amd.com/v2-staging/gfx1151/ \
+#  --pre torch torchaudio torchvision
+
+#RUN pip install /opt/vllm/.deps/triton-src
+
+# cache large files method
+# bust
+COPY deps/torch_wheels/*.whl /tmp/torch_wheels/
+ENV PYTORCH_ROCM_ARCH="gfx1151"
+ENV AMDGPU_TARGETS="gfx1151"
+RUN python -m pip install \
+  /tmp/torch_wheels/rocm_sdk_libraries_gfx1151-*.whl \
+  /tmp/torch_wheels/rocm_sdk_core-*.whl \
+  /tmp/torch_wheels/triton-*.whl \
+  /tmp/torch_wheels/torch-*.whl \
+  /tmp/torch_wheels/torchaudio-*.whl \
+  /tmp/torch_wheels/torchvision-*.whl \
+  --index-url https://rocm.nightlies.amd.com/v2-staging/gfx1151/ \
+  --extra-index-url https://pypi.org/simple
+
+RUN python -c "import torch; print(torch.__file__); print(torch.__version__)"
+RUN python -c "import torch; print(f'Version: {torch.__version__}'); print(f'HIP: {torch.version.hip}'); print(f'CUDA: {torch.version.cuda}'); print(f'Arch list: {torch.cuda.get_arch_list()}'); print(f'ROCm built: {torch.version.hip is not None}')"
+RUN python -c "import os; os.environ['HSA_OVERRIDE_GFX_VERSION']='11.5.1'; import torch; print(f'Device count: {torch.cuda.device_count()}'); print(f'Available: {torch.cuda.is_available()}')"
+#RUN python -c "import torch; arches = torch.cuda.get_arch_list(); print(f'Arch list: {arches}'); assert 'gfx1151' in arches, 'gfx1151 not in arch list!'"

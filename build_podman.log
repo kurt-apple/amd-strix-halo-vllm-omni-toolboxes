@@ -1,0 +1,619 @@
+STEP 1/63: FROM localhost/vllm-rocm-second:latest
+STEP 2/63: WORKDIR /opt
+--> Using cache 3f6b9c8e44217d63912b7bc79ecc8afc024c279d0641d1e15b601c5fc4f8f3b2
+--> 3f6b9c8e4421
+STEP 3/63: ENV FLASH_ATTENTION_TRITON_AMD_ENABLE="TRUE"
+--> Using cache d9f04ea254e3a75abb1e497d1d21e3ea4030e18a886ab263b27648868c7d9c6a
+--> d9f04ea254e3
+STEP 4/63: RUN echo "torch==2.11.0a0+rocm7.12.0a20260211" > /tmp/constraints.txt
+--> Using cache cd61b367524531c94b79992c801c5f199264e374b27dc9f330185fe290cec506
+--> cd61b3675245
+STEP 5/63: RUN git clone https://github.com/ROCm/flash-attention.git &&  cd flash-attention &&  git checkout main_perf &&  pip install --constraint /tmp/constraints.txt --no-build-isolation . &&  cd /opt && rm -rf /opt/flash-attention
+--> Using cache 45fac1e1a939a7f3d6dc4027aa5bb7de575a584ef4e9802f728a939f6319d89d
+--> 45fac1e1a939
+STEP 6/63: RUN git clone --depth=1 --branch v0.16.0 https://github.com/vllm-project/vllm.git /opt/vllm
+--> Using cache 097623791e2a25c648630b039648c5c24b2348b3f801d7db71bec6222b8f8f9e
+--> 097623791e2a
+STEP 7/63: COPY deps/triton-v3.6.0.tar.gz /tmp/
+--> Using cache 3ada08612e68677ec4cdf56e501cb8b20a2dd6e9665b62905e50d4a82a60d994
+--> 3ada08612e68
+STEP 8/63: RUN mkdir -p /opt/vllm/.deps &&   tar xzf /tmp/triton-v3.6.0.tar.gz -C /opt/vllm/.deps
+--> Using cache 9eef4320a2a342687978baef1d9b0d86b1ffd0af01a4ea2a02e0450ca559c834
+--> 9eef4320a2a3
+STEP 9/63: ENV TRITON_KERNELS_SRC_DIR="/opt/vllm/.deps/triton/python/triton_kernels"
+--> Using cache d175b64dfb80e0bb87b98017c17ca11745e6d2ec604995d007320ec0ddc2e335
+--> d175b64dfb80
+STEP 10/63: WORKDIR /opt/vllm
+--> Using cache 29184f5c9f6d60c7fe574b982228c8f33767364f1f821043da56f120f7c2e48f
+--> 29184f5c9f6d
+STEP 11/63: RUN echo "import sys, re" > patch_strix.py &&   echo "from pathlib import Path" >> patch_strix.py &&   echo "p = Path('vllm/platforms/__init__.py')" >> patch_strix.py &&   echo "txt = p.read_text()" >> patch_strix.py &&   echo "txt = txt.replace('import amdsmi', '# import amdsmi')" >> patch_strix.py &&   echo "txt = re.sub(r'is_rocm = .*', 'is_rocm = True', txt)" >> patch_strix.py &&   echo "txt = re.sub(r'if len\(amdsmi\.amdsmi_get_processor_handles\(\)\) > 0:', 'if True:', txt)" >> patch_strix.py &&   echo "txt = txt.replace('amdsmi.amdsmi_init()', 'pass')" >> patch_strix.py &&   echo "txt = txt.replace('amdsmi.amdsmi_shut_down()', 'pass')" >> patch_strix.py &&   echo "p.write_text(txt)" >> patch_strix.py &&   echo "p = Path('vllm/platforms/rocm.py')" >> patch_strix.py &&   echo "txt = p.read_text()" >> patch_strix.py &&   echo "header = 'import sys\nfrom unittest.mock import MagicMock\nsys.modules[\"amdsmi\"] = MagicMock()\n'" >> patch_strix.py &&   echo "txt = header + txt" >> patch_strix.py &&   echo "txt = re.sub(r'device_type = .*', 'device_type = \"rocm\"', txt)" >> patch_strix.py &&   echo "txt = re.sub(r'device_name = .*', 'device_name = \"gfx1151\"', txt)" >> patch_strix.py &&   echo "txt += '\n    def get_device_name(self, device_id: int = 0) -> str:\n        return \"AMD-gfx1151\"\n'" >> patch_strix.py &&   echo "p.write_text(txt)" >> patch_strix.py &&   echo "p = Path('csrc/quantization/w8a8/fp8/amd/quant_utils.cuh')" >> patch_strix.py &&   echo "if p.exists():" >> patch_strix.py &&   echo "    txt = p.read_text()" >> patch_strix.py &&   echo "    txt = txt.replace('if (KV_DTYPE == \"auto\")', 'if (std::string(KV_DTYPE) == \"auto\")')" >> patch_strix.py &&   echo "    txt = txt.replace('if (KV_DTYPE == \"fp8\" || KV_DTYPE == \"fp8_e4m3\")', 'if (std::string(KV_DTYPE) == \"fp8\" || std::string(KV_DTYPE) == \"fp8_e4m3\")')" >> patch_strix.py &&   echo "    p.write_text(txt)" >> patch_strix.py &&   echo "print('Successfully patched vLLM for Strix Halo')" >> patch_strix.py &&   python patch_strix.py &&   sed -i 's/gfx1200;gfx1201/gfx1151/' CMakeLists.txt  
+--> Using cache 47c9dae662d92c007d19df85065e6c1652665611f3c23ced391e73b10bc2f3e7
+--> 47c9dae662d9
+STEP 12/63: RUN python -m pip install --upgrade cmake ninja packaging wheel numpy "setuptools-scm>=8" "setuptools<80.0.0" scikit-build-core pybind11
+--> Using cache 60e4f47f474bb1ab86c299b9e257543718a1c4c709d597deae4b1f1636b6661f
+--> 60e4f47f474b
+STEP 13/63: RUN grep -rl "getCurrentHIPStreamMasqueradingAsCUDA\|C10_HIP_CHECK" /opt/vllm/csrc/ |   xargs sed -i     -e 's/C10_HIP_CHECK/C10_CUDA_CHECK/g'     -e 's/getCurrentHIPStreamMasqueradingAsCUDA/getCurrentHIPStream/g'
+--> Using cache 90a0a2da14f596343d0d0154437be14d00c0ec701e312915833cb652d6caaa7c
+--> 90a0a2da14f5
+STEP 14/63: ENV ROCM_HOME="/opt/rocm"
+--> Using cache 9e48d0d645f1d9dc357e1999996ecc5540ca84acd485579f6f7904b9296253c2
+--> 9e48d0d645f1
+STEP 15/63: ENV HIP_PATH="/opt/rocm"
+--> Using cache f4ad3cae86320be5108fb5a39568b7b42a4ec3788e6d081fb10875f9578b680d
+--> f4ad3cae8632
+STEP 16/63: ENV VLLM_TARGET_DEVICE="rocm"
+--> Using cache 73e32bb10e916b8d2e912b139eac7fa30921a053a535a19083571b84bc72f511
+--> 73e32bb10e91
+STEP 17/63: ENV HIP_ARCHITECTURES="gfx1151"          
+--> Using cache 99f71b3d343af86f66a164c3adebdff671bd43631f853b959d6a3ec3d1cacf9c
+--> 99f71b3d343a
+STEP 18/63: ENV MAX_JOBS="16"
+--> Using cache 7b1f959deaf13640b990f839d88f141d2624cb2459803cf5c8e8672343f5f229
+--> 7b1f959deaf1
+STEP 19/63: ENV CC="/opt/rocm/llvm/bin/clang"
+--> Using cache 7ea00380e46dab3d15600778e9e14226055357bb13a9869e0917d9e0d7d1cc10
+--> 7ea00380e46d
+STEP 20/63: ENV CXX="/opt/rocm/llvm/bin/clang++"
+--> Using cache fb634bbff6cd85278944b16df4c3de78d9069ee8ec4bebf5e870ddbc5f112900
+--> fb634bbff6cd
+STEP 21/63: ENV ROCM_TARGET_LST="gfx1151"
+--> Using cache abe6b9032d540b4e201cfc5c02604bfba337d27766fbb2f698761db2594f0319
+--> abe6b9032d54
+STEP 22/63: ENV HIP_VISIBLE_DEVICES="0"
+--> Using cache 3f9cdc03b217f50907789e7f07e7894f37946026ddf1454103d6c83ec8ebb3d6
+--> 3f9cdc03b217
+STEP 23/63: ENV HSA_OVERRIDE_GFX_VERSION="11.5.1"
+--> Using cache 1f00d483b19633d8932e231037096cbda0798ff63b1d6b0e88e8c21d6447a863
+--> 1f00d483b196
+STEP 24/63: RUN sed -i 's/C10_HIP_CHECK/C10_CUDA_CHECK/g' /opt/vllm/csrc/mamba/mamba_ssm/selective_scan_fwd.cu
+--> Using cache 1b36eb103af842615f4ba57ab6c1f724990771a307662793f6bdde12271ad3ba
+--> 1b36eb103af8
+STEP 25/63: RUN printf '#!/bin/bash\necho "gfx1151"\n' > /usr/local/bin/offload-arch &&   chmod +x /usr/local/bin/offload-arch &&   cp /usr/local/bin/offload-arch /opt/venv/bin/offload-arch &&   cp /usr/local/bin/offload-arch /opt/rocm/lib/llvm/bin/offload-arch &&   cp /usr/local/bin/offload-arch /opt/venv/lib/python3.13/site-packages/_rocm_sdk_core/lib/llvm/bin/offload-arch
+--> Using cache 4a0640fdbc9e92d3e5e4939a8987b8cccd35e1cddc59ebca7990527f93abc4ab
+--> 4a0640fdbc9e
+STEP 26/63: RUN export HIP_DEVICE_LIB_PATH=$(find /opt/rocm -type d -name bitcode -print -quit) &&   export TORCH_CMAKE_PATH=/opt/venv/lib/python3.13/site-packages/torch/share/cmake &&   echo "Torch CMake path: $TORCH_CMAKE_PATH" &&   echo "Compiling with Bitcode: $HIP_DEVICE_LIB_PATH" &&   export CMAKE_ARGS="-DROCM_PATH=/opt/rocm -DHIP_PATH=/opt/rocm -DAMDGPU_TARGETS=gfx1151 -DHIP_ARCHITECTURES=gfx1151 -DCMAKE_PREFIX_PATH=${TORCH_CMAKE_PATH}" &&   echo "CMAKE_ARGS: $CMAKE_ARGS" &&   Torch_DIR=${TORCH_CMAKE_PATH}/Torch   CMAKE_ARGS="${CMAKE_ARGS}"   python -m pip wheel --no-build-isolation --no-deps -w /tmp/dist -v . &&   python -m pip install /tmp/dist/*.whl
+--> Using cache aa76ef1300c047ec3abe4029ff47bb56fc8d413ab969c71e59c717938b821f7b
+--> aa76ef1300c0
+STEP 27/63: RUN sed -i '71s/assert val == cuda_val/pass  # patched: assert val == cuda_val/'     /opt/venv/lib64/python3.13/site-packages/vllm/platforms/rocm.py &&     sed -i '73s/os.environ\["CUDA_VISIBLE_DEVICES"\] = val/pass  # patched: removed CUDA env set/'     /opt/venv/lib64/python3.13/site-packages/vllm/platforms/rocm.py
+--> e7f783a09f9c
+STEP 28/63: RUN python -m pip install ray
+Requirement already satisfied: ray in /opt/venv/lib64/python3.13/site-packages (2.54.0)
+Requirement already satisfied: click>=7.0 in /opt/venv/lib64/python3.13/site-packages (from ray) (8.3.1)
+Requirement already satisfied: filelock in /opt/venv/lib64/python3.13/site-packages (from ray) (3.24.2)
+Requirement already satisfied: jsonschema in /opt/venv/lib64/python3.13/site-packages (from ray) (4.26.0)
+Requirement already satisfied: msgpack<2.0.0,>=1.0.0 in /opt/venv/lib64/python3.13/site-packages (from ray) (1.1.2)
+Requirement already satisfied: packaging>=24.2 in /opt/venv/lib64/python3.13/site-packages (from ray) (26.0)
+Requirement already satisfied: protobuf>=3.20.3 in /opt/venv/lib64/python3.13/site-packages (from ray) (6.33.5)
+Requirement already satisfied: pyyaml in /opt/venv/lib64/python3.13/site-packages (from ray) (6.0.3)
+Requirement already satisfied: requests in /opt/venv/lib64/python3.13/site-packages (from ray) (2.32.5)
+Requirement already satisfied: attrs>=22.2.0 in /opt/venv/lib64/python3.13/site-packages (from jsonschema->ray) (25.4.0)
+Requirement already satisfied: jsonschema-specifications>=2023.03.6 in /opt/venv/lib64/python3.13/site-packages (from jsonschema->ray) (2025.9.1)
+Requirement already satisfied: referencing>=0.28.4 in /opt/venv/lib64/python3.13/site-packages (from jsonschema->ray) (0.37.0)
+Requirement already satisfied: rpds-py>=0.25.0 in /opt/venv/lib64/python3.13/site-packages (from jsonschema->ray) (0.30.0)
+Requirement already satisfied: charset_normalizer<4,>=2 in /opt/venv/lib64/python3.13/site-packages (from requests->ray) (3.4.4)
+Requirement already satisfied: idna<4,>=2.5 in /opt/venv/lib64/python3.13/site-packages (from requests->ray) (3.11)
+Requirement already satisfied: urllib3<3,>=1.21.1 in /opt/venv/lib64/python3.13/site-packages (from requests->ray) (2.6.3)
+Requirement already satisfied: certifi>=2017.4.17 in /opt/venv/lib64/python3.13/site-packages (from requests->ray) (2026.1.4)
+--> e1c5b44c131b
+STEP 29/63: WORKDIR /opt
+--> c508e28a6f07
+STEP 30/63: RUN git clone -b rocm_enabled_multi_backend https://github.com/ROCm/bitsandbytes.git
+Cloning into 'bitsandbytes'...
+--> 45bc222ef591
+STEP 31/63: WORKDIR /opt/bitsandbytes
+--> 9a91e6b2a38b
+STEP 32/63: ENV HIP_PLATFORM="amd"
+--> 43964a075129
+STEP 33/63: ENV CMAKE_PREFIX_PATH="/opt/rocm"
+--> fb7e9de46f62
+STEP 34/63: RUN cmake -S .   -DGPU_TARGETS="gfx1151"   -DBNB_ROCM_ARCH="gfx1151"   -DCOMPUTE_BACKEND=hip   -DCMAKE_HIP_COMPILER=/opt/rocm/llvm/bin/clang++   -DCMAKE_CXX_COMPILER=/opt/rocm/llvm/bin/clang++   &&   make -j$(nproc) &&   python -m pip install --no-cache-dir . --no-build-isolation --no-deps
+-- The CXX compiler identification is Clang 22.0.0
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /opt/rocm/llvm/bin/clang++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Configuring bitsandbytes (Backend: hip)
+-- NO_CUBLASLT := OFF
+-- The HIP compiler identification is Clang 22.0.0
+-- Detecting HIP compiler ABI info
+-- Detecting HIP compiler ABI info - done
+-- Check for working HIP compiler: /opt/rocm/llvm/bin/clang++ - skipped
+-- Detecting HIP compile features
+-- Detecting HIP compile features - done
+-- HIP Compiler: /opt/rocm/llvm/bin/clang++
+-- HIP Targets: gfx1151
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Success
+-- Found Threads: TRUE
+-- Performing Test HIP_CLANG_SUPPORTS_PARALLEL_JOBS
+-- Performing Test HIP_CLANG_SUPPORTS_PARALLEL_JOBS - Success
+hipblas VERSION: 3.3.0
+hiprand VERSION: 3.1.0
+hipsparse VERSION: 4.3.0
+-- Configuring done (1.2s)
+-- Generating done (0.0s)
+-- Build files have been written to: /opt/bitsandbytes
+[ 16%] Building CXX object CMakeFiles/bitsandbytes.dir/csrc/common.cpp.o
+[ 50%] Building CXX object CMakeFiles/bitsandbytes.dir/csrc/cpu_ops.cpp.o
+[ 50%] Building HIP object CMakeFiles/bitsandbytes.dir/csrc/ops.hip.o
+[ 66%] Building CXX object CMakeFiles/bitsandbytes.dir/csrc/pythonInterface.cpp.o
+[ 83%] Building HIP object CMakeFiles/bitsandbytes.dir/csrc/kernels.hip.o
+In file included from /opt/bitsandbytes/csrc/cpu_ops.cpp:1:
+In file included from /opt/bitsandbytes/include/BinSearch.h:11:
+In file included from /opt/bitsandbytes/include/Algo-Direct2.h:3:
+/opt/bitsandbytes/include/Algo-Direct-Common.h:89:62: warning: implicit conversion from 'unsigned int' to 'float' changes value from 4294967294 to 4294967296 [-Wimplicit-const-int-float-conversion]
+   89 |         myassert((ifmax < std::numeric_limits<uint32>::max() - (Gap - 1)),
+      |                         ~ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~
+/opt/bitsandbytes/include/Portable.h:84:34: note: expanded from macro 'myassert'
+   84 | #define myassert(cond, msg) if (!cond){ std::ostringstream os; os << "\nassertion failed: " << #cond << ", " << msg << "\n"; throw std::invalid_argument(os.str()); }
+      |                                  ^~~~
+/opt/bitsandbytes/include/Algo-Direct-Common.h:248:16: note: in instantiation of member function 'BinSearch::Details::DirectAux::DirectTraits<false, '\x02', float>::checkH' requested here
+  248 |         fun_t::checkH(H, cst0, xN);
+      |                ^
+/opt/bitsandbytes/include/Algo-Direct-Common.h:307:27: note: in instantiation of member function 'BinSearch::Details::DirectAux::DirectInfo<'\x02', float, BinSearch::Direct2>::computeH' requested here
+  307 |         HResults<T> res = computeH(px, n);
+      |                           ^
+/opt/bitsandbytes/include/Algo-Direct2.h:17:11: note: in instantiation of member function 'BinSearch::Details::DirectAux::DirectInfo<'\x02', float, BinSearch::Direct2>::DirectInfo' requested here
+   17 |         : base_t(x, n)
+      |           ^
+/opt/bitsandbytes/include/Algo-Direct2.h:291:47: note: in instantiation of member function 'BinSearch::Details::AlgoScalarBase<float, BinSearch::Direct2>::AlgoScalarBase' requested here
+  291 |     AlgoVecBase(const T* x, const uint32 n) : base_t(x, n) {}
+      |                                               ^
+/opt/bitsandbytes/include/Type.h:215:49: note: in instantiation of member function 'BinSearch::Details::AlgoVecBase<BinSearch::Scalar, float, BinSearch::Direct2>::AlgoVecBase' requested here
+  215 |     BinAlgoBase(const T* px, const uint32 n) :  base_t(px, n) {}
+      |                                                 ^
+/opt/bitsandbytes/include/BinAlgo.h:13:45: note: in instantiation of member function 'BinSearch::Details::BinAlgoBase<BinSearch::Scalar, float, BinSearch::Direct2>::BinAlgoBase' requested here
+   13 |     BinAlgo(const T* px, const uint32 n) :  base_t(px, n), x0(px[0]), xN(px[n-1]), N(n) {}
+      |                                             ^
+/opt/bitsandbytes/csrc/cpu_ops.cpp:26:37: note: in instantiation of member function 'BinSearch::BinAlgo<BinSearch::Scalar, float, BinSearch::Direct2>::BinAlgo' requested here
+   26 |     BinAlgo<Scalar, float, Direct2> bin_searcher(code, elements_code);
+      |                                     ^
+1 warning generated.
+/opt/bitsandbytes/csrc/kernels.hip:2862:17: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+ 2862 | __global__ void kspmm_coo_very_sparse_naive(int *max_count, int *max_idx, int *offset_rowidx, int *rowidx, int *colidx, half *values, T *B, half *out, float * __restrict__ const dequant_stats, int nnz, int rowsA, int rowsB, int colsB)
+      |                 ^
+/opt/bitsandbytes/csrc/kernels.hip:2862:17: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/opt/bitsandbytes/csrc/kernels.hip:2862:17: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/opt/bitsandbytes/csrc/kernels.hip:2862:17: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/opt/bitsandbytes/csrc/kernels.hip:2862:17: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+/opt/bitsandbytes/csrc/kernels.hip:2862:17: warning: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering [-Wpass-failed=transform-warning]
+6 warnings generated when compiling for gfx1151.
+[100%] Linking CXX shared library bitsandbytes/libbitsandbytes_rocm73.so
+[100%] Built target bitsandbytes
+Processing ./.
+  Preparing metadata (pyproject.toml): started
+  Preparing metadata (pyproject.toml): finished with status 'done'
+Building wheels for collected packages: bitsandbytes
+  Building wheel for bitsandbytes (pyproject.toml): started
+  Building wheel for bitsandbytes (pyproject.toml): finished with status 'done'
+  Created wheel for bitsandbytes: filename=bitsandbytes-0.43.3.dev0-cp313-cp313-linux_x86_64.whl size=485589 sha256=5b7ccf6d92cef485f6756980a5b63df22123d2b8f241f74d432729004689ee5b
+  Stored in directory: /tmp/pip-ephem-wheel-cache-dguc8afc/wheels/61/05/5e/53399c6cce11384c80c7adaaa3ccff507004cc13036437c7b0
+Successfully built bitsandbytes
+Installing collected packages: bitsandbytes
+Successfully installed bitsandbytes-0.43.3.dev0
+--> c92f5926739d
+STEP 35/63: WORKDIR /opt
+--> 211a0b39c57c
+STEP 36/63: RUN chmod -R a+rwX /opt &&   find /opt/venv -type f -name "*.so" -exec strip -s {} + 2>/dev/null || true &&   find /opt/venv -type d -name "__pycache__" -prune -exec rm -rf {} + &&   rm -rf /root/.cache/pip || true &&   dnf clean all && rm -rf /var/cache/dnf/*
+Removed 0 files, 0 directories (total of 0 B). 0 errors occurred.
+--> 0ce803969405
+STEP 37/63: COPY scripts/01-rocm-env-for-triton.sh /etc/profile.d/01-rocm-env-for-triton.sh
+--> 4fe85ba5020f
+STEP 38/63: COPY scripts/99-toolbox-banner.sh /etc/profile.d/99-toolbox-banner.sh
+--> fb85afa53dce
+STEP 39/63: COPY scripts/zz-venv-last.sh /etc/profile.d/zz-venv-last.sh
+--> 350fa6cfb82a
+STEP 40/63: COPY scripts/start_vllm.py /opt/start-vllm
+--> bf4c52886d84
+STEP 41/63: COPY scripts/start_vllm_cluster.py /opt/start-vllm-cluster
+--> 5e5016bcc184
+STEP 42/63: COPY scripts/measure_bandwidth.sh /opt/measure_bandwidth.sh
+--> 3219c56b82fc
+STEP 43/63: COPY scripts/cluster_manager.py /opt/cluster_manager.py
+--> 974711c560dd
+STEP 44/63: COPY scripts/models.py /opt/models.py
+--> e6a6cef1e028
+STEP 45/63: COPY benchmarks/max_context_results.json /opt/max_context_results.json
+--> 0869b5f4c1b2
+STEP 46/63: COPY benchmarks/run_vllm_bench.py /opt/run_vllm_bench.py
+--> ceb6ca39f7c0
+STEP 47/63: COPY benchmarks/vllm_cluster_bench.py /opt/vllm_cluster_bench.py
+--> 6fafa5c99a7f
+STEP 48/63: COPY benchmarks/find_max_context.py /opt/find_max_context.py
+--> 5c7a94045b33
+STEP 49/63: COPY rdma_cluster/compare_eth_vs_rdma.sh /opt/compare_eth_vs_rdma.sh
+--> c9b453de2cd8
+STEP 50/63: COPY scripts/configure_cluster.sh /opt/configure_cluster.sh
+--> 75ce153b42c6
+STEP 51/63: RUN chmod +x /opt/configure_cluster.sh
+--> 0aa93c042c4b
+STEP 52/63: RUN chmod +x /opt/start-vllm /opt/start-vllm-cluster /opt/vllm_cluster_bench.py /opt/compare_eth_vs_rdma.sh /opt/find_max_context.py /opt/run_vllm_bench.py &&   ln -s /opt/start-vllm /usr/local/bin/start-vllm &&   ln -s /opt/start-vllm-cluster /usr/local/bin/start-vllm-cluster &&   chmod 0644 /etc/profile.d/*.sh /opt/max_context_results.json /opt/models.py
+--> e19b8ef91e3b
+STEP 53/63: RUN chmod 0644 /etc/profile.d/*.sh
+--> f60e15a5a488
+STEP 54/63: RUN printf 'ulimit -S -c 0\n' > /etc/profile.d/90-nocoredump.sh && chmod 0644 /etc/profile.d/90-nocoredump.sh
+--> 72f61fa071d6
+STEP 55/63: COPY custom_libs/librccl.so.1.gz /tmp/librccl.so.1.gz
+--> afcfe7b3482a
+STEP 56/63: RUN echo "Installing Custom RCCL..." &&   gzip -d /tmp/librccl.so.1.gz &&   chmod 755 /tmp/librccl.so.1 &&   cp -fv /tmp/librccl.so.1 /opt/rocm/lib/librccl.so.1.0 &&   find /opt/venv -name "librccl.so.1" -exec cp -fv /tmp/librccl.so.1 {} + &&   rm /tmp/librccl.so.1
+Installing Custom RCCL...
+'/tmp/librccl.so.1' -> '/opt/rocm/lib/librccl.so.1.0'
+'/tmp/librccl.so.1' -> '/opt/venv/lib/python3.13/site-packages/_rocm_sdk_libraries_gfx1151/lib/librccl.so.1'
+--> 2168db8d2da2
+STEP 57/63: RUN pip install transformers==5.1.0
+Collecting transformers==5.1.0
+  Downloading transformers-5.1.0-py3-none-any.whl.metadata (31 kB)
+Collecting huggingface-hub<2.0,>=1.3.0 (from transformers==5.1.0)
+  Downloading huggingface_hub-1.4.1-py3-none-any.whl.metadata (13 kB)
+Requirement already satisfied: numpy>=1.17 in ./venv/lib64/python3.13/site-packages (from transformers==5.1.0) (2.2.6)
+Requirement already satisfied: packaging>=20.0 in ./venv/lib64/python3.13/site-packages (from transformers==5.1.0) (26.0)
+Requirement already satisfied: pyyaml>=5.1 in ./venv/lib64/python3.13/site-packages (from transformers==5.1.0) (6.0.3)
+Requirement already satisfied: regex!=2019.12.17 in ./venv/lib64/python3.13/site-packages (from transformers==5.1.0) (2026.1.15)
+Requirement already satisfied: tokenizers<=0.23.0,>=0.22.0 in ./venv/lib64/python3.13/site-packages (from transformers==5.1.0) (0.22.2)
+Collecting typer-slim (from transformers==5.1.0)
+  Downloading typer_slim-0.24.0-py3-none-any.whl.metadata (4.2 kB)
+Requirement already satisfied: safetensors>=0.4.3 in ./venv/lib64/python3.13/site-packages (from transformers==5.1.0) (0.7.0)
+Requirement already satisfied: tqdm>=4.27 in ./venv/lib64/python3.13/site-packages (from transformers==5.1.0) (4.67.3)
+Requirement already satisfied: filelock in ./venv/lib64/python3.13/site-packages (from huggingface-hub<2.0,>=1.3.0->transformers==5.1.0) (3.24.2)
+Requirement already satisfied: fsspec>=2023.5.0 in ./venv/lib64/python3.13/site-packages (from huggingface-hub<2.0,>=1.3.0->transformers==5.1.0) (2025.10.0)
+Requirement already satisfied: hf-xet<2.0.0,>=1.2.0 in ./venv/lib64/python3.13/site-packages (from huggingface-hub<2.0,>=1.3.0->transformers==5.1.0) (1.2.0)
+Requirement already satisfied: httpx<1,>=0.23.0 in ./venv/lib64/python3.13/site-packages (from huggingface-hub<2.0,>=1.3.0->transformers==5.1.0) (0.28.1)
+Requirement already satisfied: shellingham in ./venv/lib64/python3.13/site-packages (from huggingface-hub<2.0,>=1.3.0->transformers==5.1.0) (1.5.4)
+Requirement already satisfied: typing-extensions>=4.1.0 in ./venv/lib64/python3.13/site-packages (from huggingface-hub<2.0,>=1.3.0->transformers==5.1.0) (4.15.0)
+Requirement already satisfied: anyio in ./venv/lib64/python3.13/site-packages (from httpx<1,>=0.23.0->huggingface-hub<2.0,>=1.3.0->transformers==5.1.0) (4.12.1)
+Requirement already satisfied: certifi in ./venv/lib64/python3.13/site-packages (from httpx<1,>=0.23.0->huggingface-hub<2.0,>=1.3.0->transformers==5.1.0) (2026.1.4)
+Requirement already satisfied: httpcore==1.* in ./venv/lib64/python3.13/site-packages (from httpx<1,>=0.23.0->huggingface-hub<2.0,>=1.3.0->transformers==5.1.0) (1.0.9)
+Requirement already satisfied: idna in ./venv/lib64/python3.13/site-packages (from httpx<1,>=0.23.0->huggingface-hub<2.0,>=1.3.0->transformers==5.1.0) (3.11)
+Requirement already satisfied: h11>=0.16 in ./venv/lib64/python3.13/site-packages (from httpcore==1.*->httpx<1,>=0.23.0->huggingface-hub<2.0,>=1.3.0->transformers==5.1.0) (0.16.0)
+Requirement already satisfied: typer>=0.24.0 in ./venv/lib64/python3.13/site-packages (from typer-slim->transformers==5.1.0) (0.24.0)
+Requirement already satisfied: click>=8.2.1 in ./venv/lib64/python3.13/site-packages (from typer>=0.24.0->typer-slim->transformers==5.1.0) (8.3.1)
+Requirement already satisfied: rich>=12.3.0 in ./venv/lib64/python3.13/site-packages (from typer>=0.24.0->typer-slim->transformers==5.1.0) (14.3.2)
+Requirement already satisfied: annotated-doc>=0.0.2 in ./venv/lib64/python3.13/site-packages (from typer>=0.24.0->typer-slim->transformers==5.1.0) (0.0.4)
+Requirement already satisfied: markdown-it-py>=2.2.0 in ./venv/lib64/python3.13/site-packages (from rich>=12.3.0->typer>=0.24.0->typer-slim->transformers==5.1.0) (4.0.0)
+Requirement already satisfied: pygments<3.0.0,>=2.13.0 in ./venv/lib64/python3.13/site-packages (from rich>=12.3.0->typer>=0.24.0->typer-slim->transformers==5.1.0) (2.19.2)
+Requirement already satisfied: mdurl~=0.1 in ./venv/lib64/python3.13/site-packages (from markdown-it-py>=2.2.0->rich>=12.3.0->typer>=0.24.0->typer-slim->transformers==5.1.0) (0.1.2)
+Downloading transformers-5.1.0-py3-none-any.whl (10.3 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 10.3/10.3 MB 11.7 MB/s  0:00:00
+Downloading huggingface_hub-1.4.1-py3-none-any.whl (553 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 553.3/553.3 kB 10.0 MB/s  0:00:00
+Downloading typer_slim-0.24.0-py3-none-any.whl (3.4 kB)
+Installing collected packages: typer-slim, huggingface-hub, transformers
+  Attempting uninstall: huggingface-hub
+    Found existing installation: huggingface_hub 0.36.2
+    Uninstalling huggingface_hub-0.36.2:
+      Successfully uninstalled huggingface_hub-0.36.2
+  Attempting uninstall: transformers
+    Found existing installation: transformers 4.57.6
+    Uninstalling transformers-4.57.6:
+      Successfully uninstalled transformers-4.57.6
+
+ERROR: pip's dependency resolver does not currently take into account all the packages that are installed. This behaviour is the source of the following dependency conflicts.
+vllm 0.16.1.dev0+g2d5be1dd5.d20260218.rocm712 requires transformers<5,>=4.56.0, but you have transformers 5.1.0 which is incompatible.
+Successfully installed huggingface-hub-1.4.1 transformers-5.1.0 typer-slim-0.24.0
+--> 033b0e53de7e
+STEP 58/63: RUN git clone --depth=1 --branch v0.16.0rc1 https://github.com/vllm-project/vllm-omni.git
+Cloning into 'vllm-omni'...
+Note: switching to '75770c93097ebfa33f16c0722e2037a93c6b9f3b'.
+
+You are in 'detached HEAD' state. You can look around, make experimental
+changes and commit them, and you can discard any commits you make in this
+state without impacting any branches by switching back to a branch.
+
+If you want to create a new branch to retain commits you create, you may
+do so (now or later) by using -c with the switch command. Example:
+
+  git switch -c <new-branch-name>
+
+Or undo this operation with:
+
+  git switch -
+
+Turn off this advice by setting config variable advice.detachedHead to false
+
+--> 770f08bedb98
+STEP 59/63: WORKDIR /opt/vllm-omni
+--> e0e76d8a5e52
+STEP 60/63: RUN sed -i 's/if len(amdsmi.amdsmi_get_processor_handles()) > 0:/if True:/' /opt/vllm-omni/vllm_omni/platforms/__init__.py
+--> bceecca043e1
+STEP 61/63: RUN VLLM_OMNI_TARGET_DEVICE=rocm pip install -e . --no-build-isolation
+Obtaining file:///opt/vllm-omni
+  Checking if build backend supports build_editable: started
+  Checking if build backend supports build_editable: finished with status 'done'
+  Preparing editable metadata (pyproject.toml): started
+  Preparing editable metadata (pyproject.toml): finished with status 'done'
+Collecting omegaconf>=2.3.0 (from vllm-omni==0.14.0)
+  Downloading omegaconf-2.3.0-py3-none-any.whl.metadata (3.9 kB)
+Collecting librosa>=0.11.0 (from vllm-omni==0.14.0)
+  Downloading librosa-0.11.0-py3-none-any.whl.metadata (8.7 kB)
+Collecting resampy>=0.4.3 (from vllm-omni==0.14.0)
+  Downloading resampy-0.4.3-py3-none-any.whl.metadata (3.0 kB)
+Collecting diffusers>=0.36.0 (from vllm-omni==0.14.0)
+  Downloading diffusers-0.36.0-py3-none-any.whl.metadata (20 kB)
+Requirement already satisfied: accelerate==1.12.0 in /opt/venv/lib64/python3.13/site-packages (from vllm-omni==0.14.0) (1.12.0)
+Collecting gradio==5.50 (from vllm-omni==0.14.0)
+  Downloading gradio-5.50.0-py3-none-any.whl.metadata (16 kB)
+Collecting soundfile>=0.13.1 (from vllm-omni==0.14.0)
+  Downloading soundfile-0.13.1-py2.py3-none-manylinux_2_28_x86_64.whl.metadata (16 kB)
+Collecting cache-dit==1.2.0 (from vllm-omni==0.14.0)
+  Downloading cache_dit-1.2.0-py3-none-any.whl.metadata (10 kB)
+Requirement already satisfied: tqdm>=4.66.0 in /opt/venv/lib64/python3.13/site-packages (from vllm-omni==0.14.0) (4.67.3)
+Collecting torchsde>=0.2.6 (from vllm-omni==0.14.0)
+  Downloading torchsde-0.2.6-py3-none-any.whl.metadata (5.3 kB)
+Collecting openai-whisper>=20250625 (from vllm-omni==0.14.0)
+  Downloading openai_whisper-20250625.tar.gz (803 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 803.2/803.2 kB 12.0 MB/s  0:00:00
+  Preparing metadata (pyproject.toml): started
+  Preparing metadata (pyproject.toml): finished with status 'done'
+Collecting imageio>=2.37.2 (from imageio[ffmpeg]>=2.37.2->vllm-omni==0.14.0)
+  Downloading imageio-2.37.2-py3-none-any.whl.metadata (9.7 kB)
+Collecting sox>=1.5.0 (from vllm-omni==0.14.0)
+  Downloading sox-1.5.0.tar.gz (63 kB)
+  Preparing metadata (pyproject.toml): started
+  Preparing metadata (pyproject.toml): finished with status 'done'
+Collecting prettytable>=3.8.0 (from vllm-omni==0.14.0)
+  Downloading prettytable-3.17.0-py3-none-any.whl.metadata (34 kB)
+Collecting aenum==3.1.16 (from vllm-omni==0.14.0)
+  Downloading aenum-3.1.16-py3-none-any.whl.metadata (3.8 kB)
+Collecting onnxruntime-rocm>=1.22.2 (from vllm-omni==0.14.0)
+  Downloading onnxruntime_rocm-1.22.2.post1-cp313-cp313-manylinux_2_35_x86_64.whl.metadata (5.1 kB)
+Requirement already satisfied: numpy>=1.17 in /opt/venv/lib64/python3.13/site-packages (from accelerate==1.12.0->vllm-omni==0.14.0) (2.2.6)
+Requirement already satisfied: packaging>=20.0 in /opt/venv/lib64/python3.13/site-packages (from accelerate==1.12.0->vllm-omni==0.14.0) (26.0)
+Requirement already satisfied: psutil in /opt/venv/lib64/python3.13/site-packages (from accelerate==1.12.0->vllm-omni==0.14.0) (7.2.2)
+Requirement already satisfied: pyyaml in /opt/venv/lib64/python3.13/site-packages (from accelerate==1.12.0->vllm-omni==0.14.0) (6.0.3)
+Requirement already satisfied: torch>=2.0.0 in /opt/venv/lib64/python3.13/site-packages (from accelerate==1.12.0->vllm-omni==0.14.0) (2.11.0a0+rocm7.12.0a20260211)
+Requirement already satisfied: huggingface_hub>=0.21.0 in /opt/venv/lib64/python3.13/site-packages (from accelerate==1.12.0->vllm-omni==0.14.0) (1.4.1)
+Requirement already satisfied: safetensors>=0.4.3 in /opt/venv/lib64/python3.13/site-packages (from accelerate==1.12.0->vllm-omni==0.14.0) (0.7.0)
+Requirement already satisfied: transformers>=4.55.2 in /opt/venv/lib64/python3.13/site-packages (from cache-dit==1.2.0->vllm-omni==0.14.0) (5.1.0)
+Collecting aiofiles<25.0,>=22.0 (from gradio==5.50->vllm-omni==0.14.0)
+  Downloading aiofiles-24.1.0-py3-none-any.whl.metadata (10 kB)
+Requirement already satisfied: anyio<5.0,>=3.0 in /opt/venv/lib64/python3.13/site-packages (from gradio==5.50->vllm-omni==0.14.0) (4.12.1)
+Collecting audioop-lts<1.0 (from gradio==5.50->vllm-omni==0.14.0)
+  Downloading audioop_lts-0.2.2-cp313-abi3-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl.metadata (2.0 kB)
+Collecting brotli>=1.1.0 (from gradio==5.50->vllm-omni==0.14.0)
+  Downloading brotli-1.2.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (6.1 kB)
+Requirement already satisfied: fastapi<1.0,>=0.115.2 in /opt/venv/lib64/python3.13/site-packages (from gradio==5.50->vllm-omni==0.14.0) (0.129.0)
+Collecting ffmpy (from gradio==5.50->vllm-omni==0.14.0)
+  Downloading ffmpy-1.0.0-py3-none-any.whl.metadata (3.0 kB)
+Collecting gradio-client==1.14.0 (from gradio==5.50->vllm-omni==0.14.0)
+  Downloading gradio_client-1.14.0-py3-none-any.whl.metadata (7.1 kB)
+Collecting groovy~=0.1 (from gradio==5.50->vllm-omni==0.14.0)
+  Downloading groovy-0.1.2-py3-none-any.whl.metadata (6.1 kB)
+Requirement already satisfied: httpx<1.0,>=0.24.1 in /opt/venv/lib64/python3.13/site-packages (from gradio==5.50->vllm-omni==0.14.0) (0.28.1)
+Requirement already satisfied: jinja2<4.0 in /opt/venv/lib64/python3.13/site-packages (from gradio==5.50->vllm-omni==0.14.0) (3.1.6)
+Requirement already satisfied: markupsafe<4.0,>=2.0 in /opt/venv/lib64/python3.13/site-packages (from gradio==5.50->vllm-omni==0.14.0) (3.0.3)
+Collecting orjson~=3.0 (from gradio==5.50->vllm-omni==0.14.0)
+  Downloading orjson-3.11.7-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (41 kB)
+Collecting pandas<3.0,>=1.0 (from gradio==5.50->vllm-omni==0.14.0)
+  Downloading pandas-2.3.3-cp313-cp313-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl.metadata (91 kB)
+Collecting pillow<12.0,>=8.0 (from gradio==5.50->vllm-omni==0.14.0)
+  Downloading pillow-11.3.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (9.0 kB)
+Collecting pydantic<=2.12.3,>=2.0 (from gradio==5.50->vllm-omni==0.14.0)
+  Downloading pydantic-2.12.3-py3-none-any.whl.metadata (87 kB)
+Collecting pydub (from gradio==5.50->vllm-omni==0.14.0)
+  Downloading pydub-0.25.1-py2.py3-none-any.whl.metadata (1.4 kB)
+Requirement already satisfied: python-multipart>=0.0.18 in /opt/venv/lib64/python3.13/site-packages (from gradio==5.50->vllm-omni==0.14.0) (0.0.22)
+Collecting ruff>=0.9.3 (from gradio==5.50->vllm-omni==0.14.0)
+  Downloading ruff-0.15.1-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (26 kB)
+Collecting safehttpx<0.2.0,>=0.1.6 (from gradio==5.50->vllm-omni==0.14.0)
+  Downloading safehttpx-0.1.7-py3-none-any.whl.metadata (4.2 kB)
+Collecting semantic-version~=2.0 (from gradio==5.50->vllm-omni==0.14.0)
+  Downloading semantic_version-2.10.0-py2.py3-none-any.whl.metadata (9.7 kB)
+Requirement already satisfied: starlette<1.0,>=0.40.0 in /opt/venv/lib64/python3.13/site-packages (from gradio==5.50->vllm-omni==0.14.0) (0.52.1)
+Collecting tomlkit<0.14.0,>=0.12.0 (from gradio==5.50->vllm-omni==0.14.0)
+  Downloading tomlkit-0.13.3-py3-none-any.whl.metadata (2.8 kB)
+Requirement already satisfied: typer<1.0,>=0.12 in /opt/venv/lib64/python3.13/site-packages (from gradio==5.50->vllm-omni==0.14.0) (0.24.0)
+Requirement already satisfied: typing-extensions~=4.0 in /opt/venv/lib64/python3.13/site-packages (from gradio==5.50->vllm-omni==0.14.0) (4.15.0)
+Requirement already satisfied: uvicorn>=0.14.0 in /opt/venv/lib64/python3.13/site-packages (from gradio==5.50->vllm-omni==0.14.0) (0.41.0)
+Requirement already satisfied: fsspec in /opt/venv/lib64/python3.13/site-packages (from gradio-client==1.14.0->gradio==5.50->vllm-omni==0.14.0) (2025.10.0)
+Collecting websockets<16.0,>=13.0 (from gradio-client==1.14.0->gradio==5.50->vllm-omni==0.14.0)
+  Downloading websockets-15.0.1-cp313-cp313-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (6.8 kB)
+Requirement already satisfied: idna>=2.8 in /opt/venv/lib64/python3.13/site-packages (from anyio<5.0,>=3.0->gradio==5.50->vllm-omni==0.14.0) (3.11)
+Requirement already satisfied: typing-inspection>=0.4.2 in /opt/venv/lib64/python3.13/site-packages (from fastapi<1.0,>=0.115.2->gradio==5.50->vllm-omni==0.14.0) (0.4.2)
+Requirement already satisfied: annotated-doc>=0.0.2 in /opt/venv/lib64/python3.13/site-packages (from fastapi<1.0,>=0.115.2->gradio==5.50->vllm-omni==0.14.0) (0.0.4)
+Requirement already satisfied: certifi in /opt/venv/lib64/python3.13/site-packages (from httpx<1.0,>=0.24.1->gradio==5.50->vllm-omni==0.14.0) (2026.1.4)
+Requirement already satisfied: httpcore==1.* in /opt/venv/lib64/python3.13/site-packages (from httpx<1.0,>=0.24.1->gradio==5.50->vllm-omni==0.14.0) (1.0.9)
+Requirement already satisfied: h11>=0.16 in /opt/venv/lib64/python3.13/site-packages (from httpcore==1.*->httpx<1.0,>=0.24.1->gradio==5.50->vllm-omni==0.14.0) (0.16.0)
+Requirement already satisfied: filelock in /opt/venv/lib64/python3.13/site-packages (from huggingface_hub>=0.21.0->accelerate==1.12.0->vllm-omni==0.14.0) (3.24.2)
+Requirement already satisfied: hf-xet<2.0.0,>=1.2.0 in /opt/venv/lib64/python3.13/site-packages (from huggingface_hub>=0.21.0->accelerate==1.12.0->vllm-omni==0.14.0) (1.2.0)
+Requirement already satisfied: shellingham in /opt/venv/lib64/python3.13/site-packages (from huggingface_hub>=0.21.0->accelerate==1.12.0->vllm-omni==0.14.0) (1.5.4)
+Requirement already satisfied: typer-slim in /opt/venv/lib64/python3.13/site-packages (from huggingface_hub>=0.21.0->accelerate==1.12.0->vllm-omni==0.14.0) (0.24.0)
+Requirement already satisfied: python-dateutil>=2.8.2 in /opt/venv/lib64/python3.13/site-packages (from pandas<3.0,>=1.0->gradio==5.50->vllm-omni==0.14.0) (2.9.0.post0)
+Collecting pytz>=2020.1 (from pandas<3.0,>=1.0->gradio==5.50->vllm-omni==0.14.0)
+  Downloading pytz-2025.2-py2.py3-none-any.whl.metadata (22 kB)
+Collecting tzdata>=2022.7 (from pandas<3.0,>=1.0->gradio==5.50->vllm-omni==0.14.0)
+  Downloading tzdata-2025.3-py2.py3-none-any.whl.metadata (1.4 kB)
+Requirement already satisfied: annotated-types>=0.6.0 in /opt/venv/lib64/python3.13/site-packages (from pydantic<=2.12.3,>=2.0->gradio==5.50->vllm-omni==0.14.0) (0.7.0)
+Collecting pydantic-core==2.41.4 (from pydantic<=2.12.3,>=2.0->gradio==5.50->vllm-omni==0.14.0)
+  Downloading pydantic_core-2.41.4-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (7.3 kB)
+Requirement already satisfied: click>=8.2.1 in /opt/venv/lib64/python3.13/site-packages (from typer<1.0,>=0.12->gradio==5.50->vllm-omni==0.14.0) (8.3.1)
+Requirement already satisfied: rich>=12.3.0 in /opt/venv/lib64/python3.13/site-packages (from typer<1.0,>=0.12->gradio==5.50->vllm-omni==0.14.0) (14.3.2)
+Collecting importlib_metadata (from diffusers>=0.36.0->vllm-omni==0.14.0)
+  Downloading importlib_metadata-8.7.1-py3-none-any.whl.metadata (4.7 kB)
+Requirement already satisfied: regex!=2019.12.17 in /opt/venv/lib64/python3.13/site-packages (from diffusers>=0.36.0->vllm-omni==0.14.0) (2026.1.15)
+Requirement already satisfied: requests in /opt/venv/lib64/python3.13/site-packages (from diffusers>=0.36.0->vllm-omni==0.14.0) (2.32.5)
+Collecting imageio-ffmpeg (from imageio[ffmpeg]>=2.37.2->vllm-omni==0.14.0)
+  Downloading imageio_ffmpeg-0.6.0-py3-none-manylinux2014_x86_64.whl.metadata (1.5 kB)
+Collecting audioread>=2.1.9 (from librosa>=0.11.0->vllm-omni==0.14.0)
+  Downloading audioread-3.1.0-py3-none-any.whl.metadata (9.0 kB)
+Requirement already satisfied: numba>=0.51.0 in /opt/venv/lib64/python3.13/site-packages (from librosa>=0.11.0->vllm-omni==0.14.0) (0.61.2)
+Collecting scipy>=1.6.0 (from librosa>=0.11.0->vllm-omni==0.14.0)
+  Downloading scipy-1.17.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (62 kB)
+Collecting scikit-learn>=1.1.0 (from librosa>=0.11.0->vllm-omni==0.14.0)
+  Downloading scikit_learn-1.8.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (11 kB)
+Collecting joblib>=1.0 (from librosa>=0.11.0->vllm-omni==0.14.0)
+  Downloading joblib-1.5.3-py3-none-any.whl.metadata (5.5 kB)
+Collecting decorator>=4.3.0 (from librosa>=0.11.0->vllm-omni==0.14.0)
+  Downloading decorator-5.2.1-py3-none-any.whl.metadata (3.9 kB)
+Collecting pooch>=1.1 (from librosa>=0.11.0->vllm-omni==0.14.0)
+  Downloading pooch-1.9.0-py3-none-any.whl.metadata (10 kB)
+Collecting soxr>=0.3.2 (from librosa>=0.11.0->vllm-omni==0.14.0)
+  Downloading soxr-1.0.0-cp312-abi3-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (5.6 kB)
+Collecting lazy_loader>=0.1 (from librosa>=0.11.0->vllm-omni==0.14.0)
+  Downloading lazy_loader-0.4-py3-none-any.whl.metadata (7.6 kB)
+Requirement already satisfied: msgpack>=1.0 in /opt/venv/lib64/python3.13/site-packages (from librosa>=0.11.0->vllm-omni==0.14.0) (1.1.2)
+Collecting standard-aifc (from librosa>=0.11.0->vllm-omni==0.14.0)
+  Downloading standard_aifc-3.13.0-py3-none-any.whl.metadata (969 bytes)
+Collecting standard-sunau (from librosa>=0.11.0->vllm-omni==0.14.0)
+  Downloading standard_sunau-3.13.0-py3-none-any.whl.metadata (914 bytes)
+Requirement already satisfied: llvmlite<0.45,>=0.44.0dev0 in /opt/venv/lib64/python3.13/site-packages (from numba>=0.51.0->librosa>=0.11.0->vllm-omni==0.14.0) (0.44.0)
+Collecting antlr4-python3-runtime==4.9.* (from omegaconf>=2.3.0->vllm-omni==0.14.0)
+  Downloading antlr4-python3-runtime-4.9.3.tar.gz (117 kB)
+  Preparing metadata (pyproject.toml): started
+  Preparing metadata (pyproject.toml): finished with status 'done'
+Collecting coloredlogs (from onnxruntime-rocm>=1.22.2->vllm-omni==0.14.0)
+  Downloading coloredlogs-15.0.1-py2.py3-none-any.whl.metadata (12 kB)
+Collecting flatbuffers (from onnxruntime-rocm>=1.22.2->vllm-omni==0.14.0)
+  Downloading flatbuffers-25.12.19-py2.py3-none-any.whl.metadata (1.0 kB)
+Requirement already satisfied: protobuf in /opt/venv/lib64/python3.13/site-packages (from onnxruntime-rocm>=1.22.2->vllm-omni==0.14.0) (6.33.5)
+Requirement already satisfied: sympy in /opt/venv/lib64/python3.13/site-packages (from onnxruntime-rocm>=1.22.2->vllm-omni==0.14.0) (1.14.0)
+Collecting more-itertools (from openai-whisper>=20250625->vllm-omni==0.14.0)
+  Downloading more_itertools-10.8.0-py3-none-any.whl.metadata (39 kB)
+Requirement already satisfied: tiktoken in /opt/venv/lib64/python3.13/site-packages (from openai-whisper>=20250625->vllm-omni==0.14.0) (0.12.0)
+Requirement already satisfied: triton>=2 in /opt/venv/lib64/python3.13/site-packages (from openai-whisper>=20250625->vllm-omni==0.14.0) (3.6.0+gitbf475bd8.rocm7.12.0a20260211)
+Collecting platformdirs>=2.5.0 (from pooch>=1.1->librosa>=0.11.0->vllm-omni==0.14.0)
+  Downloading platformdirs-4.9.2-py3-none-any.whl.metadata (4.7 kB)
+Collecting wcwidth (from prettytable>=3.8.0->vllm-omni==0.14.0)
+  Downloading wcwidth-0.6.0-py3-none-any.whl.metadata (30 kB)
+Requirement already satisfied: six>=1.5 in /opt/venv/lib64/python3.13/site-packages (from python-dateutil>=2.8.2->pandas<3.0,>=1.0->gradio==5.50->vllm-omni==0.14.0) (1.17.0)
+Requirement already satisfied: charset_normalizer<4,>=2 in /opt/venv/lib64/python3.13/site-packages (from requests->diffusers>=0.36.0->vllm-omni==0.14.0) (3.4.4)
+Requirement already satisfied: urllib3<3,>=1.21.1 in /opt/venv/lib64/python3.13/site-packages (from requests->diffusers>=0.36.0->vllm-omni==0.14.0) (2.6.3)
+Requirement already satisfied: markdown-it-py>=2.2.0 in /opt/venv/lib64/python3.13/site-packages (from rich>=12.3.0->typer<1.0,>=0.12->gradio==5.50->vllm-omni==0.14.0) (4.0.0)
+Requirement already satisfied: pygments<3.0.0,>=2.13.0 in /opt/venv/lib64/python3.13/site-packages (from rich>=12.3.0->typer<1.0,>=0.12->gradio==5.50->vllm-omni==0.14.0) (2.19.2)
+Requirement already satisfied: mdurl~=0.1 in /opt/venv/lib64/python3.13/site-packages (from markdown-it-py>=2.2.0->rich>=12.3.0->typer<1.0,>=0.12->gradio==5.50->vllm-omni==0.14.0) (0.1.2)
+Collecting threadpoolctl>=3.2.0 (from scikit-learn>=1.1.0->librosa>=0.11.0->vllm-omni==0.14.0)
+  Downloading threadpoolctl-3.6.0-py3-none-any.whl.metadata (13 kB)
+Requirement already satisfied: cffi>=1.0 in /opt/venv/lib64/python3.13/site-packages (from soundfile>=0.13.1->vllm-omni==0.14.0) (2.0.0)
+Requirement already satisfied: pycparser in /opt/venv/lib64/python3.13/site-packages (from cffi>=1.0->soundfile>=0.13.1->vllm-omni==0.14.0) (3.0)
+Requirement already satisfied: setuptools<82 in /opt/venv/lib64/python3.13/site-packages (from torch>=2.0.0->accelerate==1.12.0->vllm-omni==0.14.0) (79.0.1)
+Requirement already satisfied: networkx>=2.5.1 in /opt/venv/lib64/python3.13/site-packages (from torch>=2.0.0->accelerate==1.12.0->vllm-omni==0.14.0) (3.6.1)
+Requirement already satisfied: rocm==7.12.0a20260211 in /opt/venv/lib64/python3.13/site-packages (from rocm[libraries]==7.12.0a20260211->torch>=2.0.0->accelerate==1.12.0->vllm-omni==0.14.0) (7.12.0a20260211)
+Requirement already satisfied: rocm-sdk-core==7.12.0a20260211 in /opt/venv/lib64/python3.13/site-packages (from rocm==7.12.0a20260211->rocm[libraries]==7.12.0a20260211->torch>=2.0.0->accelerate==1.12.0->vllm-omni==0.14.0) (7.12.0a20260211)
+Requirement already satisfied: rocm-sdk-libraries-gfx1151==7.12.0a20260211 in /opt/venv/lib64/python3.13/site-packages (from rocm[libraries]==7.12.0a20260211->torch>=2.0.0->accelerate==1.12.0->vllm-omni==0.14.0) (7.12.0a20260211)
+Requirement already satisfied: mpmath<1.4,>=1.1.0 in /opt/venv/lib64/python3.13/site-packages (from sympy->onnxruntime-rocm>=1.22.2->vllm-omni==0.14.0) (1.3.0)
+Collecting trampoline>=0.1.2 (from torchsde>=0.2.6->vllm-omni==0.14.0)
+  Downloading trampoline-0.1.2-py3-none-any.whl.metadata (10 kB)
+Requirement already satisfied: tokenizers<=0.23.0,>=0.22.0 in /opt/venv/lib64/python3.13/site-packages (from transformers>=4.55.2->cache-dit==1.2.0->vllm-omni==0.14.0) (0.22.2)
+Collecting humanfriendly>=9.1 (from coloredlogs->onnxruntime-rocm>=1.22.2->vllm-omni==0.14.0)
+  Downloading humanfriendly-10.0-py2.py3-none-any.whl.metadata (9.2 kB)
+Collecting zipp>=3.20 (from importlib_metadata->diffusers>=0.36.0->vllm-omni==0.14.0)
+  Downloading zipp-3.23.0-py3-none-any.whl.metadata (3.6 kB)
+Collecting standard-chunk (from standard-aifc->librosa>=0.11.0->vllm-omni==0.14.0)
+  Downloading standard_chunk-3.13.0-py3-none-any.whl.metadata (860 bytes)
+Downloading aenum-3.1.16-py3-none-any.whl (165 kB)
+Downloading cache_dit-1.2.0-py3-none-any.whl (303 kB)
+Downloading gradio-5.50.0-py3-none-any.whl (63.5 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 63.5/63.5 MB 11.5 MB/s  0:00:05
+Downloading gradio_client-1.14.0-py3-none-any.whl (325 kB)
+Downloading aiofiles-24.1.0-py3-none-any.whl (15 kB)
+Downloading audioop_lts-0.2.2-cp313-abi3-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (85 kB)
+Downloading groovy-0.1.2-py3-none-any.whl (14 kB)
+Downloading orjson-3.11.7-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (133 kB)
+Downloading pandas-2.3.3-cp313-cp313-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl (12.3 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 12.3/12.3 MB 11.4 MB/s  0:00:01
+Downloading pillow-11.3.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (6.6 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 6.6/6.6 MB 11.6 MB/s  0:00:00
+Downloading pydantic-2.12.3-py3-none-any.whl (462 kB)
+Downloading pydantic_core-2.41.4-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (2.1 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.1/2.1 MB 11.8 MB/s  0:00:00
+Downloading safehttpx-0.1.7-py3-none-any.whl (9.0 kB)
+Downloading semantic_version-2.10.0-py2.py3-none-any.whl (15 kB)
+Downloading tomlkit-0.13.3-py3-none-any.whl (38 kB)
+Downloading websockets-15.0.1-cp313-cp313-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl (182 kB)
+Downloading brotli-1.2.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (1.4 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.4/1.4 MB 11.9 MB/s  0:00:00
+Downloading diffusers-0.36.0-py3-none-any.whl (4.6 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.6/4.6 MB 11.8 MB/s  0:00:00
+Downloading imageio-2.37.2-py3-none-any.whl (317 kB)
+Downloading librosa-0.11.0-py3-none-any.whl (260 kB)
+Downloading audioread-3.1.0-py3-none-any.whl (23 kB)
+Downloading decorator-5.2.1-py3-none-any.whl (9.2 kB)
+Downloading joblib-1.5.3-py3-none-any.whl (309 kB)
+Downloading lazy_loader-0.4-py3-none-any.whl (12 kB)
+Downloading omegaconf-2.3.0-py3-none-any.whl (79 kB)
+Downloading onnxruntime_rocm-1.22.2.post1-cp313-cp313-manylinux_2_35_x86_64.whl (217.9 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 217.9/217.9 MB 11.6 MB/s  0:00:18
+Downloading pooch-1.9.0-py3-none-any.whl (67 kB)
+Downloading platformdirs-4.9.2-py3-none-any.whl (21 kB)
+Downloading prettytable-3.17.0-py3-none-any.whl (34 kB)
+Downloading pytz-2025.2-py2.py3-none-any.whl (509 kB)
+Downloading resampy-0.4.3-py3-none-any.whl (3.1 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 3.1/3.1 MB 11.6 MB/s  0:00:00
+Downloading ruff-0.15.1-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (11.1 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 11.1/11.1 MB 11.7 MB/s  0:00:00
+Downloading scikit_learn-1.8.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (8.9 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 8.9/8.9 MB 11.7 MB/s  0:00:00
+Downloading scipy-1.17.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (35.0 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 35.0/35.0 MB 5.3 MB/s  0:00:06
+Downloading soundfile-0.13.1-py2.py3-none-manylinux_2_28_x86_64.whl (1.3 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.3/1.3 MB 9.8 MB/s  0:00:00
+Downloading soxr-1.0.0-cp312-abi3-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (238 kB)
+Downloading threadpoolctl-3.6.0-py3-none-any.whl (18 kB)
+Downloading torchsde-0.2.6-py3-none-any.whl (61 kB)
+Downloading trampoline-0.1.2-py3-none-any.whl (5.2 kB)
+Downloading tzdata-2025.3-py2.py3-none-any.whl (348 kB)
+Downloading coloredlogs-15.0.1-py2.py3-none-any.whl (46 kB)
+Downloading humanfriendly-10.0-py2.py3-none-any.whl (86 kB)
+Downloading ffmpy-1.0.0-py3-none-any.whl (5.6 kB)
+Downloading flatbuffers-25.12.19-py2.py3-none-any.whl (26 kB)
+Downloading imageio_ffmpeg-0.6.0-py3-none-manylinux2014_x86_64.whl (29.5 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 29.5/29.5 MB 10.5 MB/s  0:00:02
+Downloading importlib_metadata-8.7.1-py3-none-any.whl (27 kB)
+Downloading zipp-3.23.0-py3-none-any.whl (10 kB)
+Downloading more_itertools-10.8.0-py3-none-any.whl (69 kB)
+Downloading pydub-0.25.1-py2.py3-none-any.whl (32 kB)
+Downloading standard_aifc-3.13.0-py3-none-any.whl (10 kB)
+Downloading standard_chunk-3.13.0-py3-none-any.whl (4.9 kB)
+Downloading standard_sunau-3.13.0-py3-none-any.whl (7.4 kB)
+Downloading wcwidth-0.6.0-py3-none-any.whl (94 kB)
+Building wheels for collected packages: vllm-omni, antlr4-python3-runtime, openai-whisper, sox
+  Building editable for vllm-omni (pyproject.toml): started
+  Building editable for vllm-omni (pyproject.toml): finished with status 'done'
+  Created wheel for vllm-omni: filename=vllm_omni-0.14.0-0.editable-py3-none-any.whl size=10186 sha256=c86bf1be8fbc27d699687970e1a7fb8e40a3573f58ba5203e1af63ed9efaeb9a
+  Stored in directory: /tmp/pip-ephem-wheel-cache-axcz5hnl/wheels/00/c1/ab/b82056f2259b8d98fcf3adb0e6124a2f783bab2a24d5bad843
+  Building wheel for antlr4-python3-runtime (pyproject.toml): started
+  Building wheel for antlr4-python3-runtime (pyproject.toml): finished with status 'done'
+  Created wheel for antlr4-python3-runtime: filename=antlr4_python3_runtime-4.9.3-py3-none-any.whl size=144129 sha256=58a95787a79d5ba94277c78114727e772bc8e3e075bc42e859cf3ad0fde6e9f4
+  Stored in directory: /tmp/pip-ephem-wheel-cache-axcz5hnl/wheels/d5/b3/74/a35b66048c9de6631cd74cbc9475e6feb3e69a467983446bd8
+  Building wheel for openai-whisper (pyproject.toml): started
+  Building wheel for openai-whisper (pyproject.toml): finished with status 'done'
+  Created wheel for openai-whisper: filename=openai_whisper-20250625-py3-none-any.whl size=799636 sha256=dad64b85840c86c969850ec2da4123104cb38317a7e40b811f08e3bfcecf6369
+  Stored in directory: /tmp/pip-ephem-wheel-cache-axcz5hnl/wheels/ca/58/d5/fb4539ad74c3ca81eb40f7eda020ac77d080b33ad57449d485
+  Building wheel for sox (pyproject.toml): started
+  Building wheel for sox (pyproject.toml): finished with status 'done'
+  Created wheel for sox: filename=sox-1.5.0-py3-none-any.whl size=40092 sha256=d8b026ce96b77cc88cc4fdf3082b380b1b9f24056a14e59d57b53319ce31caed
+  Stored in directory: /tmp/pip-ephem-wheel-cache-axcz5hnl/wheels/17/9c/a8/49133befe771ab64bd2ab4cd9a0a79c83f9276be9955ed135d
+Successfully built vllm-omni antlr4-python3-runtime openai-whisper sox
+Installing collected packages: trampoline, standard-chunk, pytz, pydub, flatbuffers, brotli, antlr4-python3-runtime, aenum, zipp, websockets, wcwidth, tzdata, tomlkit, threadpoolctl, soxr, sox, semantic-version, scipy, ruff, pydantic-core, platformdirs, pillow, orjson, omegaconf, more-itertools, lazy_loader, joblib, imageio-ffmpeg, humanfriendly, groovy, ffmpy, decorator, audioop-lts, aiofiles, standard-sunau, standard-aifc, soundfile, scikit-learn, resampy, pydantic, prettytable, pooch, pandas, importlib_metadata, imageio, coloredlogs, safehttpx, onnxruntime-rocm, audioread, librosa, gradio-client, diffusers, gradio, torchsde, openai-whisper, cache-dit, vllm-omni
+  Attempting uninstall: websockets
+    Found existing installation: websockets 16.0
+    Uninstalling websockets-16.0:
+      Successfully uninstalled websockets-16.0
+  Attempting uninstall: pydantic-core
+    Found existing installation: pydantic_core 2.41.5
+    Uninstalling pydantic_core-2.41.5:
+      Successfully uninstalled pydantic_core-2.41.5
+  Attempting uninstall: pillow
+    Found existing installation: pillow 12.1.1
+    Uninstalling pillow-12.1.1:
+      Successfully uninstalled pillow-12.1.1
+  Attempting uninstall: pydantic
+    Found existing installation: pydantic 2.12.5
+    Uninstalling pydantic-2.12.5:
+      Successfully uninstalled pydantic-2.12.5
+  Attempting uninstall: pandas
+    Found existing installation: pandas 3.0.1
+    Uninstalling pandas-3.0.1:
+      Successfully uninstalled pandas-3.0.1
+
+ERROR: pip's dependency resolver does not currently take into account all the packages that are installed. This behaviour is the source of the following dependency conflicts.
+vllm 0.16.1.dev0+g2d5be1dd5.d20260218.rocm712 requires transformers<5,>=4.56.0, but you have transformers 5.1.0 which is incompatible.
+Successfully installed aenum-3.1.16 aiofiles-24.1.0 antlr4-python3-runtime-4.9.3 audioop-lts-0.2.2 audioread-3.1.0 brotli-1.2.0 cache-dit-1.2.0 coloredlogs-15.0.1 decorator-5.2.1 diffusers-0.36.0 ffmpy-1.0.0 flatbuffers-25.12.19 gradio-5.50.0 gradio-client-1.14.0 groovy-0.1.2 humanfriendly-10.0 imageio-2.37.2 imageio-ffmpeg-0.6.0 importlib_metadata-8.7.1 joblib-1.5.3 lazy_loader-0.4 librosa-0.11.0 more-itertools-10.8.0 omegaconf-2.3.0 onnxruntime-rocm-1.22.2.post1 openai-whisper-20250625 orjson-3.11.7 pandas-2.3.3 pillow-11.3.0 platformdirs-4.9.2 pooch-1.9.0 prettytable-3.17.0 pydantic-2.12.3 pydantic-core-2.41.4 pydub-0.25.1 pytz-2025.2 resampy-0.4.3 ruff-0.15.1 safehttpx-0.1.7 scikit-learn-1.8.0 scipy-1.17.0 semantic-version-2.10.0 soundfile-0.13.1 sox-1.5.0 soxr-1.0.0 standard-aifc-3.13.0 standard-chunk-3.13.0 standard-sunau-3.13.0 threadpoolctl-3.6.0 tomlkit-0.13.3 torchsde-0.2.6 trampoline-0.1.2 tzdata-2025.3 vllm-omni-0.14.0 wcwidth-0.6.0 websockets-15.0.1 zipp-3.23.0
+--> b3fe70ccbd73
+STEP 62/63: RUN chmod -R a+rwX /opt
+--> d47de6ae804d
+STEP 63/63: CMD ["/bin/bash"]
+COMMIT my-vllm-rocm
+--> bc269c71781f
+Successfully tagged localhost/my-vllm-rocm:latest
+bc269c71781f3c8b1449746ffbdd58ddc556ed15fd46e830a45df79fccb3f579

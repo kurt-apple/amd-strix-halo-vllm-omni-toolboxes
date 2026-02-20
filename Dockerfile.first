@@ -1,0 +1,26 @@
+FROM registry.fedoraproject.org/fedora:43
+
+# 1. System Base & Build Tools
+# Added 'gperftools-libs' for tcmalloc (fixes double-free)
+COPY scripts/install_deps.sh /tmp/install_deps.sh
+RUN sh /tmp/install_deps.sh
+
+# 2. Install "TheRock" ROCm SDK (Tarball Method)
+WORKDIR /tmp
+ARG ROCM_MAJOR_VER=7
+ARG GFX=gfx1151
+# We pass ARGs to the script via ENV or rely on defaults.
+# But let's be explicit and export them for the RUN command.
+COPY scripts/install_rocm_sdk.sh /tmp/install_rocm_sdk.sh
+RUN chmod +x /tmp/install_rocm_sdk.sh && \
+  export ROCM_MAJOR_VER=$ROCM_MAJOR_VER && \
+  export GFX=$GFX && \
+  /tmp/install_rocm_sdk.sh
+
+# 4. Python Venv Setup
+RUN /usr/bin/python3.13 -m venv /opt/venv
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH=/opt/venv/bin:$PATH
+ENV PIP_NO_CACHE_DIR=1
+RUN printf 'source /opt/venv/bin/activate\n' > /etc/profile.d/venv.sh
+RUN python -m pip install --upgrade pip wheel packaging "setuptools<80.0.0"
